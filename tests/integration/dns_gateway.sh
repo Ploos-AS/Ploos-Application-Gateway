@@ -37,7 +37,7 @@ ip -n "$C" route add 198.51.100.0/24 via 192.0.2.1
 ip -n "$U" route add 192.0.2.0/24 via 198.51.100.1
 ip netns exec "$R" sysctl -q -w net.ipv4.ip_forward=1
 
-ip netns exec "$U" "$TMP/test-dns" -listen 198.51.100.2:5353 &
+ip netns exec "$U" "$TMP/test-dns" -listen 198.51.100.2:5353 -truncate-udp &
 UPID=$!
 sleep .2
 
@@ -73,7 +73,26 @@ r=open(sys.argv[1],'rb').read()
 assert len(r)>=12, "short DNS response"
 assert r[:2]==b'\x12\x34', "transaction mismatch"
 assert r[2]&0x80, "response bit missing"
-print("PASS: pag-dns proxied validated DNS response")
+print("PASS: pag-dns UDP query succeeded through TC-to-TCP fallback")
+PY
+
+# Native DNS-over-TCP path: send the same query with RFC 1035 length framing.
+python3 - "$TMP/query.bin" <<'PY' >"$TMP/tcp-query.bin"
+import struct,sys
+q=open(sys.argv[1],'rb').read()
+sys.stdout.buffer.write(struct.pack("!H",len(q))+q)
+PY
+cat "$TMP/tcp-query.bin" | ip netns exec "$C" nc -w 2 192.0.2.1 5353 >"$TMP/tcp-response.bin"
+python3 - "$TMP/tcp-response.bin" <<'PY'
+import struct,sys
+r=open(sys.argv[1],'rb').read()
+assert len(r)>=14, "short framed TCP DNS response"
+n=struct.unpack("!H",r[:2])[0]
+assert n==len(r)-2, "TCP DNS length mismatch"
+dns=r[2:]
+assert dns[:2]==b'\x12\x34', "TCP transaction mismatch"
+assert dns[2]&0x80, "TCP response bit missing"
+print("PASS: pag-dns native TCP path")
 PY
 
 # Direct client access to the upstream must still fail.
