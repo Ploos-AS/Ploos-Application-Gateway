@@ -8,6 +8,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnsaudit"
@@ -40,18 +42,34 @@ func main() {
 	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 { log.Fatal("global limits must be >= 1") }
 	udpSlots := make(chan struct{}, *maxUDPGlobal)
 	tcpSlots := make(chan struct{}, *maxTCPGlobal)
-	go serveUDP(*listen, *upstream, udpLimit, audit, udpSlots)
-	serveTCP(*listen, *upstream, tcpLimit, audit, tcpSlots)
+
+	pc, err := net.ListenPacket("udp", *listen)
+	if err != nil { log.Fatal(err) }
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil { _=pc.Close(); log.Fatal(err) }
+
+	stop:=make(chan os.Signal,1)
+	signal.Notify(stop,os.Interrupt,syscall.SIGTERM)
+	done:=make(chan struct{},2)
+	go func(){ serveUDP(pc,*upstream,udpLimit,audit,udpSlots); done<-struct{}{} }()
+	go func(){ serveTCP(ln,*upstream,tcpLimit,audit,tcpSlots); done<-struct{}{} }()
+	<-stop
+	signal.Stop(stop)
+	_ = pc.Close()
+	_ = ln.Close()
+	_ = controlListener.Close()
+	<-done; <-done
 }
 
-func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
-	pc, err := net.ListenPacket("udp", addr)
-	if err != nil { log.Fatal(err) }
+func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
 	defer pc.Close()
 	buf := make([]byte, 4096)
 	for {
 		n, peer, err := pc.ReadFrom(buf)
-		if err != nil { log.Fatal(err) }
+		if err != nil {
+			if isClosedNetworkError(err) { return }
+			log.Printf("UDP read: %v",err); return
+		}
 		q := append([]byte(nil), buf[:n]...)
 		if !limiter.Allow(peer) { audit.Log("deny","udp",0,"rate_limit"); continue }
 		if err:=dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()); err != nil {
@@ -88,13 +106,14 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Log
 	}
 }
 
-func serveTCP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil { log.Fatal(err) }
+func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
-		if err != nil { log.Fatal(err) }
+		if err != nil {
+			if isClosedNetworkError(err) { return }
+			log.Printf("TCP accept: %v",err); return
+		}
 		select {
 		case slots <- struct{}{}:
 		default:
@@ -153,6 +172,10 @@ func mustQType(q []byte) uint16 {
 	parsed,err:=dnswire.ParseQuestion(q)
 	if err!=nil{return 0}
 	return parsed.Type
+}
+
+func isClosedNetworkError(err error) bool {
+	return err==net.ErrClosed
 }
 
 func init() {
