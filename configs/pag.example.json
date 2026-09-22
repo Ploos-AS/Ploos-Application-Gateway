@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "zones": {
+    "lan": {"interfaces": ["lan0"]},
+    "wan": {"interfaces": ["wan0"]}
+  },
+  "policy": {
+    "default": "deny",
+    "rules": [
+      {
+        "name": "lan-dns",
+        "from": "lan",
+        "to": "wan",
+        "protocol": "dns",
+        "action": "proxy",
+        "gateway": "pag-dns"
+      }
+    ]
+  },
+  "gateways": {
+    "pag-dns": {
+      "enabled": true,
+      "socket": "/run/pag/pag-dns.sock"
+    }
+  }
+}
