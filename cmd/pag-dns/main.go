@@ -40,7 +40,7 @@ func serveUDP(addr, upstream string) {
 			if _, err = c.Write(q); err != nil { return }
 			r := make([]byte, 4096)
 			n, err := c.Read(r)
-			if err == nil && n >= 12 { _, _ = pc.WriteTo(r[:n], peer) }
+			if err == nil && dnswire.ValidateResponse(q, r[:n]) == nil { _, _ = pc.WriteTo(r[:n], peer) }
 		}()
 	}
 }
@@ -75,7 +75,7 @@ func handleTCP(client net.Conn, upstream string) {
 	rn := int(binary.BigEndian.Uint16(hdr[:]))
 	if rn < 12 || rn > 4096 { return }
 	r := make([]byte, rn)
-	if _, err = io.ReadFull(up, r); err != nil || len(r) < 12 { return }
+	if _, err = io.ReadFull(up, r); err != nil || dnswire.ValidateResponse(q, r) != nil { return }
 	_, _ = client.Write(append(hdr[:], r...))
 }
 
