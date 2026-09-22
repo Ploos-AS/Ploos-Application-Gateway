@@ -36,3 +36,30 @@ func TestConcurrency(t *testing.T) {
 	l.Release(a)
 	if !l.Acquire(a) { t.Fatal("release did not restore capacity") }
 }
+
+
+func TestIdleClientsExpire(t *testing.T) {
+	l:=New(1,1,0)
+	now:=time.Unix(0,0)
+	l.now=func() time.Time{return now}
+	l.idleTTL=time.Minute
+	a:=addr("192.0.2.1:1")
+	if !l.Allow(a) { t.Fatal("initial request rejected") }
+	if len(l.clients)!=1 { t.Fatal("client state not created") }
+	now=now.Add(2*time.Minute)
+	b:=addr("192.0.2.2:1")
+	if !l.Allow(b) { t.Fatal("new client rejected") }
+	if _,ok:=l.clients["192.0.2.1"]; ok { t.Fatal("idle client state not expired") }
+}
+
+func TestActiveClientDoesNotExpire(t *testing.T) {
+	l:=New(1,1,1)
+	now:=time.Unix(0,0)
+	l.now=func() time.Time{return now}
+	l.idleTTL=time.Minute
+	a:=addr("192.0.2.1:1")
+	if !l.Acquire(a) { t.Fatal("acquire failed") }
+	now=now.Add(2*time.Minute)
+	_ = l.Allow(addr("192.0.2.2:1"))
+	if _,ok:=l.clients["192.0.2.1"]; !ok { t.Fatal("active client expired") }
+}
