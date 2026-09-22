@@ -20,5 +20,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nftables iproute2 iputils-ping
       - name: Qualify generated ruleset
         run: sudo sh tests/integration/check_renderer.sh
+      - name: Qualify external gateway discovery and fail-closed removal
+        run: sh tests/integration/gateway_discovery.sh
       - name: Run anti-bypass namespace qualification
         run: sudo sh tests/integration/anti_bypass.sh
