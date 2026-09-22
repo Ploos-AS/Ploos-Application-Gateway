@@ -95,6 +95,42 @@ assert dns[2]&0x80, "TCP response bit missing"
 print("PASS: pag-dns native TCP path")
 PY
 
+# Negative policy paths must fail closed without an upstream response.
+python3 - <<'PY' >"$TMP/axfr.bin"
+import sys
+q=bytearray(b'\x20\x01\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00')
+q.extend(b'\x07example\x03com\x00\x00\xfc\x00\x01')
+sys.stdout.buffer.write(q)
+PY
+cat "$TMP/axfr.bin" | ip netns exec "$C" nc -u -w 1 192.0.2.1 5353 >"$TMP/axfr-response.bin" 2>/dev/null || true
+[ ! -s "$TMP/axfr-response.bin" ] || { echo "FAIL: AXFR passed policy" >&2; exit 1; }
+echo "PASS: AXFR denied"
+
+python3 - <<'PY' >"$TMP/any.bin"
+import sys
+q=bytearray(b'\x20\x02\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00')
+q.extend(b'\x07example\x03com\x00\x00\xff\x00\x01')
+sys.stdout.buffer.write(q)
+PY
+cat "$TMP/any.bin" | ip netns exec "$C" nc -u -w 1 192.0.2.1 5353 >"$TMP/any-response.bin" 2>/dev/null || true
+[ ! -s "$TMP/any-response.bin" ] || { echo "FAIL: ANY passed policy" >&2; exit 1; }
+echo "PASS: ANY denied"
+
+printf '\001\002\003' | ip netns exec "$C" nc -u -w 1 192.0.2.1 5353 >"$TMP/malformed-response.bin" 2>/dev/null || true
+[ ! -s "$TMP/malformed-response.bin" ] || { echo "FAIL: malformed DNS passed policy" >&2; exit 1; }
+echo "PASS: malformed DNS denied"
+
+python3 - <<'PY' >"$TMP/edns-large.bin"
+import sys
+q=bytearray(b'\x20\x03\x01\x00\x00\x01\x00\x00\x00\x00\x00\x01')
+q.extend(b'\x07example\x03com\x00\x00\x01\x00\x01')
+q.extend(b'\x00\x00\x29\x10\x00\x00\x00\x00\x00\x00\x00')
+sys.stdout.buffer.write(q)
+PY
+cat "$TMP/edns-large.bin" | ip netns exec "$C" nc -u -w 1 192.0.2.1 5353 >"$TMP/edns-large-response.bin" 2>/dev/null || true
+[ ! -s "$TMP/edns-large-response.bin" ] || { echo "FAIL: oversized EDNS passed policy" >&2; exit 1; }
+echo "PASS: oversized EDNS denied"
+
 # Direct client access to the upstream must still fail.
 if cat "$TMP/query.bin" | ip netns exec "$C" nc -u -w 1 198.51.100.2 5353 >"$TMP/direct.bin" 2>/dev/null && [ -s "$TMP/direct.bin" ]; then
  echo "FAIL: client bypassed pag-dns" >&2
