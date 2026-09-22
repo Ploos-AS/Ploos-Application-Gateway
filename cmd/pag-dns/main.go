@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnsaudit"
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnswire"
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/gateway"
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/limit"
@@ -23,11 +24,16 @@ func main() {
 	rate := flag.Float64("rate", 50, "queries per second per client")
 	burst := flag.Int("burst", 100, "per-client query burst")
 	maxTCP := flag.Int("max-tcp-per-client", 16, "maximum concurrent TCP sessions per client")
+	auditEnabled := flag.Bool("audit", true, "emit privacy-minimal structured DNS audit events")
 	flag.Parse()
 
 	controlListener, err := (gateway.ControlServer{ID:"pag-dns", Version:version.Version, Socket:*control}).Serve()
 	if err != nil { log.Fatalf("control socket: %v", err) }
 	defer controlListener.Close()
+
+	var audit *dnsaudit.Logger
+	if *auditEnabled { audit = dnsaudit.New(os.Stderr) }
+	_ = audit
 
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
