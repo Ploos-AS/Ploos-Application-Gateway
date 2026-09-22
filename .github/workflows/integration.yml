@@ -24,3 +24,5 @@ jobs:
         run: sh tests/integration/gateway_discovery.sh
       - name: Run anti-bypass namespace qualification
         run: sudo sh tests/integration/anti_bypass.sh
+      - name: Qualify proxied dataplane path
+        run: sudo sh tests/integration/dataplane_proxy.sh
