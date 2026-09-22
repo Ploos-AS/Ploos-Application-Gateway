@@ -26,3 +26,5 @@ jobs:
         run: sudo sh tests/integration/anti_bypass.sh
       - name: Qualify proxied dataplane path
         run: sudo sh tests/integration/dataplane_proxy.sh
+      - name: Qualify pag-dns end-to-end
+        run: sudo sh tests/integration/dns_gateway.sh
