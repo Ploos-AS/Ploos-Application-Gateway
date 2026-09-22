@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "zones": {
+    "lan": {"interfaces": ["pag-r0"]},
+    "wan": {"interfaces": ["pag-r1"]}
+  },
+  "policy": {
+    "default": "deny",
+    "rules": [
+      {
+        "name": "test-proxy",
+        "from": "lan",
+        "to": "wan",
+        "protocol": "test",
+        "action": "proxy",
+        "gateway": "pag-test"
+      }
+    ]
+  },
+  "gateways": {
+    "pag-test": {
+      "enabled": true,
+      "socket": "/tmp/pag-test.sock"
+    }
+  }
+}
