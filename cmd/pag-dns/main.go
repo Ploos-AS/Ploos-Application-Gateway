@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnswire"
 )
 
 func main() {
@@ -29,7 +31,7 @@ func serveUDP(addr, upstream string) {
 		n, peer, err := pc.ReadFrom(buf)
 		if err != nil { log.Fatal(err) }
 		q := append([]byte(nil), buf[:n]...)
-		if !validDNS(q) { continue }
+		if dnswire.ValidateQuery(q) != nil { continue }
 		go func() {
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil { return }
@@ -38,7 +40,7 @@ func serveUDP(addr, upstream string) {
 			if _, err = c.Write(q); err != nil { return }
 			r := make([]byte, 4096)
 			n, err := c.Read(r)
-			if err == nil && validDNS(r[:n]) { _, _ = pc.WriteTo(r[:n], peer) }
+			if err == nil && n >= 12 { _, _ = pc.WriteTo(r[:n], peer) }
 		}()
 	}
 }
@@ -62,7 +64,7 @@ func handleTCP(client net.Conn, upstream string) {
 	n := int(binary.BigEndian.Uint16(hdr[:]))
 	if n < 12 || n > 4096 { return }
 	q := make([]byte, n)
-	if _, err := io.ReadFull(client, q); err != nil || !validDNS(q) { return }
+	if _, err := io.ReadFull(client, q); err != nil || dnswire.ValidateQuery(q) != nil { return }
 
 	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
 	if err != nil { return }
@@ -73,15 +75,8 @@ func handleTCP(client net.Conn, upstream string) {
 	rn := int(binary.BigEndian.Uint16(hdr[:]))
 	if rn < 12 || rn > 4096 { return }
 	r := make([]byte, rn)
-	if _, err = io.ReadFull(up, r); err != nil || !validDNS(r) { return }
+	if _, err = io.ReadFull(up, r); err != nil || len(r) < 12 { return }
 	_, _ = client.Write(append(hdr[:], r...))
-}
-
-func validDNS(m []byte) bool {
-	if len(m) < 12 { return false }
-	qd := binary.BigEndian.Uint16(m[4:6])
-	// M2 prototype accepts exactly one question and rejects malformed/minimal abuse.
-	return qd == 1
 }
 
 func init() {
