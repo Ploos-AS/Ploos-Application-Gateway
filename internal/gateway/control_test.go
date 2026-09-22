@@ -61,3 +61,13 @@ func TestControlServerStalledClientTimesOut(t *testing.T) {
 	var b [1]byte
 	if _,err=c.Read(b[:]);err==nil{t.Fatal("stalled control connection remained usable")}
 }
+
+
+func TestControlServerCloseRemovesSocket(t *testing.T) {
+	path:=filepath.Join(t.TempDir(),"control.sock")
+	ln,err:=(ControlServer{ID:"pag-dns",Version:"0.1.0",Socket:path}).Serve()
+	if err!=nil{t.Fatal(err)}
+	if _,err:=os.Stat(path);err!=nil{t.Fatal(err)}
+	if err:=ln.Close();err!=nil{t.Fatal(err)}
+	if _,err:=os.Stat(path);!os.IsNotExist(err){t.Fatalf("control socket remains after close: %v",err)}
+}
