@@ -31,7 +31,7 @@ func serveUDP(addr, upstream string) {
 		n, peer, err := pc.ReadFrom(buf)
 		if err != nil { log.Fatal(err) }
 		q := append([]byte(nil), buf[:n]...)
-		if dnswire.ValidateQuery(q) != nil { continue }
+		if dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()) != nil { continue }
 		go func() {
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil { return }
@@ -64,7 +64,7 @@ func handleTCP(client net.Conn, upstream string) {
 	n := int(binary.BigEndian.Uint16(hdr[:]))
 	if n < 12 || n > 4096 { return }
 	q := make([]byte, n)
-	if _, err := io.ReadFull(client, q); err != nil || dnswire.ValidateQuery(q) != nil { return }
+	if _, err := io.ReadFull(client, q); err != nil || dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()) != nil { return }
 
 	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
 	if err != nil { return }
