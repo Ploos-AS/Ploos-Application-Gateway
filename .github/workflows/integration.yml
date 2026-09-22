@@ -30,3 +30,5 @@ jobs:
         run: sudo sh tests/integration/dns_gateway.sh
       - name: Qualify pag-dns resource limits
         run: sh tests/integration/dns_limits.sh
+      - name: Qualify pag-dns shutdown lifecycle
+        run: sh tests/integration/dns_shutdown.sh
