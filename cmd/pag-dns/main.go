@@ -54,7 +54,14 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter) {
 			if _, err = c.Write(q); err != nil { return }
 			r := make([]byte, 4096)
 			n, err := c.Read(r)
-			if err == nil && dnswire.ValidateResponse(q, r[:n]) == nil { _, _ = pc.WriteTo(r[:n], peer) }
+			if err != nil { return }
+			resp := r[:n]
+			if dnswire.ValidateResponse(q, resp) != nil { return }
+			if dnswire.IsTruncated(resp) {
+				resp, err = exchangeTCP(upstream, q)
+				if err != nil { return }
+			}
+			_, _ = pc.WriteTo(resp, peer)
 		}()
 	}
 }
@@ -69,6 +76,23 @@ func serveTCP(addr, upstream string, limiter *limit.Limiter) {
 		if !limiter.Allow(c.RemoteAddr()) || !limiter.Acquire(c.RemoteAddr()) { _ = c.Close(); continue }
 		go func() { defer limiter.Release(c.RemoteAddr()); handleTCP(c, upstream) }()
 	}
+}
+
+func exchangeTCP(upstream string, q []byte) ([]byte, error) {
+	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
+	if err != nil { return nil, err }
+	defer up.Close()
+	_ = up.SetDeadline(time.Now().Add(5*time.Second))
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(q)))
+	if _, err = up.Write(append(hdr[:], q...)); err != nil { return nil, err }
+	if _, err = io.ReadFull(up, hdr[:]); err != nil { return nil, err }
+	rn := int(binary.BigEndian.Uint16(hdr[:]))
+	if rn < 12 || rn > 4096 { return nil, io.ErrUnexpectedEOF }
+	r := make([]byte, rn)
+	if _, err = io.ReadFull(up, r); err != nil { return nil, err }
+	if err = dnswire.ValidateResponse(q, r); err != nil { return nil, err }
+	return r, nil
 }
 
 func handleTCP(client net.Conn, upstream string) {
