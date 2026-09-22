@@ -37,11 +37,11 @@ func main() {
 
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
-	go serveUDP(*listen, *upstream, udpLimit)
-	serveTCP(*listen, *upstream, tcpLimit)
+	go serveUDP(*listen, *upstream, udpLimit, audit)
+	serveTCP(*listen, *upstream, tcpLimit, audit)
 }
 
-func serveUDP(addr, upstream string, limiter *limit.Limiter) {
+func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger) {
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil { log.Fatal(err) }
 	defer pc.Close()
@@ -50,8 +50,13 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter) {
 		n, peer, err := pc.ReadFrom(buf)
 		if err != nil { log.Fatal(err) }
 		q := append([]byte(nil), buf[:n]...)
-		if !limiter.Allow(peer) { continue }
-		if dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()) != nil { continue }
+		if !limiter.Allow(peer) { audit.Log("deny","udp",0,"rate_limit"); continue }
+		if err:=dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()); err != nil {
+			var qt uint16
+			if parsed,e:=dnswire.ParseQuestion(q); e==nil { qt=parsed.Type }
+			audit.Log("deny","udp",qt,err.Error())
+			continue
+		}
 		go func() {
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil { return }
@@ -68,19 +73,21 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter) {
 				if err != nil { return }
 			}
 			_, _ = pc.WriteTo(resp, peer)
+			audit.Log("allow","udp",mustQType(q),"proxied")
 		}()
 	}
 }
 
-func serveTCP(addr, upstream string, limiter *limit.Limiter) {
+func serveTCP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil { log.Fatal(err) }
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
 		if err != nil { log.Fatal(err) }
-		if !limiter.Allow(c.RemoteAddr()) || !limiter.Acquire(c.RemoteAddr()) { _ = c.Close(); continue }
-		go func() { defer limiter.Release(c.RemoteAddr()); handleTCP(c, upstream) }()
+		if !limiter.Allow(c.RemoteAddr()) { audit.Log("deny","tcp",0,"rate_limit"); _=c.Close(); continue }
+		if !limiter.Acquire(c.RemoteAddr()) { audit.Log("deny","tcp",0,"concurrency_limit"); _=c.Close(); continue }
+		go func() { defer limiter.Release(c.RemoteAddr()); handleTCP(c, upstream, audit) }()
 	}
 }
 
@@ -101,7 +108,7 @@ func exchangeTCP(upstream string, q []byte) ([]byte, error) {
 	return r, nil
 }
 
-func handleTCP(client net.Conn, upstream string) {
+func handleTCP(client net.Conn, upstream string, audit *dnsaudit.Logger) {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(5*time.Second))
 	var hdr [2]byte
@@ -109,7 +116,8 @@ func handleTCP(client net.Conn, upstream string) {
 	n := int(binary.BigEndian.Uint16(hdr[:]))
 	if n < 12 || n > 4096 { return }
 	q := make([]byte, n)
-	if _, err := io.ReadFull(client, q); err != nil || dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()) != nil { return }
+	if _, err := io.ReadFull(client, q); err != nil { audit.Log("deny","tcp",0,"read_error"); return }
+	if err:=dnswire.ValidateQueryPolicy(q,dnswire.DefaultPolicy()); err!=nil { audit.Log("deny","tcp",mustQType(q),err.Error()); return }
 
 	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
 	if err != nil { return }
@@ -122,6 +130,13 @@ func handleTCP(client net.Conn, upstream string) {
 	r := make([]byte, rn)
 	if _, err = io.ReadFull(up, r); err != nil || dnswire.ValidateResponse(q, r) != nil { return }
 	_, _ = client.Write(append(hdr[:], r...))
+	audit.Log("allow","tcp",mustQType(q),"proxied")
+}
+
+func mustQType(q []byte) uint16 {
+	parsed,err:=dnswire.ParseQuestion(q)
+	if err!=nil{return 0}
+	return parsed.Type
 }
 
 func init() {
