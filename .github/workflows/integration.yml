@@ -1,0 +1,18 @@
+name: Integration
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  anti-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nftables
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 iputils-ping
+      - name: Run anti-bypass namespace qualification
+        run: sudo sh tests/integration/anti_bypass.sh
