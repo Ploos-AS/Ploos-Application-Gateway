@@ -11,18 +11,24 @@ import (
 	"time"
 
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnswire"
+	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/limit"
 )
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:5353", "UDP/TCP listen address")
 	upstream := flag.String("upstream", "1.1.1.1:53", "DNS upstream address")
+	rate := flag.Float64("rate", 50, "queries per second per client")
+	burst := flag.Int("burst", 100, "per-client query burst")
+	maxTCP := flag.Int("max-tcp-per-client", 16, "maximum concurrent TCP sessions per client")
 	flag.Parse()
 
-	go serveUDP(*listen, *upstream)
-	serveTCP(*listen, *upstream)
+	udpLimit := limit.New(*rate, *burst, 0)
+	tcpLimit := limit.New(*rate, *burst, *maxTCP)
+	go serveUDP(*listen, *upstream, udpLimit)
+	serveTCP(*listen, *upstream, tcpLimit)
 }
 
-func serveUDP(addr, upstream string) {
+func serveUDP(addr, upstream string, limiter *limit.Limiter) {
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil { log.Fatal(err) }
 	defer pc.Close()
@@ -31,6 +37,7 @@ func serveUDP(addr, upstream string) {
 		n, peer, err := pc.ReadFrom(buf)
 		if err != nil { log.Fatal(err) }
 		q := append([]byte(nil), buf[:n]...)
+		if !limiter.Allow(peer) { continue }
 		if dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()) != nil { continue }
 		go func() {
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
@@ -45,14 +52,15 @@ func serveUDP(addr, upstream string) {
 	}
 }
 
-func serveTCP(addr, upstream string) {
+func serveTCP(addr, upstream string, limiter *limit.Limiter) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil { log.Fatal(err) }
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
 		if err != nil { log.Fatal(err) }
-		go handleTCP(c, upstream)
+		if !limiter.Allow(c.RemoteAddr()) || !limiter.Acquire(c.RemoteAddr()) { _ = c.Close(); continue }
+		go func() { defer limiter.Release(c.RemoteAddr()); handleTCP(c, upstream) }()
 	}
 }
 
