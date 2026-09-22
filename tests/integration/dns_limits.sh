@@ -60,3 +60,32 @@ sleep .1
 grep -q '"transport":"tcp".*"reason":"concurrency_limit"' "$TMP/audit.log"
 wait "$HOLD"
 echo "PASS: TCP concurrency limit enforced and audited"
+
+
+# Global TCP cap must protect the gateway even when per-client capacity is higher.
+kill "$PID"; wait "$PID" 2>/dev/null || true
+: >"$TMP/audit.log"
+"$TMP/pag-dns" -listen 127.0.0.1:55353 -upstream 127.0.0.1:9 \
+  -control "$SOCK" -rate 100 -burst 100 -max-tcp-per-client 16 -max-tcp-global 1 \
+  2>"$TMP/audit.log" &
+PID=$!
+sleep .3
+python3 - <<'PY' &
+import socket,time
+s=socket.create_connection(("127.0.0.1",55353))
+time.sleep(2)
+s.close()
+PY
+HOLD=$!
+sleep .2
+python3 - <<'PY'
+import socket
+s=socket.create_connection(("127.0.0.1",55353))
+try: s.sendall(b"\x00\x0c"+b"\x00"*12)
+except OSError: pass
+s.close()
+PY
+sleep .1
+grep -q '"transport":"tcp".*"reason":"global_concurrency_limit"' "$TMP/audit.log"
+wait "$HOLD"
+echo "PASS: global TCP concurrency limit enforced and audited"
