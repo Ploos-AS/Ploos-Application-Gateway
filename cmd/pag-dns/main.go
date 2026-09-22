@@ -33,8 +33,6 @@ func main() {
 
 	var audit *dnsaudit.Logger
 	if *auditEnabled { audit = dnsaudit.New(os.Stderr) }
-	_ = audit
-
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
 	go serveUDP(*listen, *upstream, udpLimit, audit)
@@ -123,6 +121,7 @@ func handleTCP(client net.Conn, upstream string, audit *dnsaudit.Logger) {
 	if err != nil { return }
 	defer up.Close()
 	_ = up.SetDeadline(time.Now().Add(5*time.Second))
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(q)))
 	if _, err = up.Write(append(hdr[:], q...)); err != nil { return }
 	if _, err = io.ReadFull(up, hdr[:]); err != nil { return }
 	rn := int(binary.BigEndian.Uint16(hdr[:]))
