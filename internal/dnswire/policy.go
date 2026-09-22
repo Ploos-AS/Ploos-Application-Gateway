@@ -34,8 +34,13 @@ func ValidateQueryPolicy(m []byte, p Policy) error {
 	if err != nil { return err }
 	if !p.AllowedTypes[q.Type] { return fmt.Errorf("DNS type %d denied by policy", q.Type) }
 
+	if binary.BigEndian.Uint16(m[6:8]) != 0 { return fmt.Errorf("answer records are not allowed in queries") }
+	if binary.BigEndian.Uint16(m[8:10]) != 0 { return fmt.Errorf("authority records are not allowed in queries") }
 	ar := binary.BigEndian.Uint16(m[10:12])
-	if ar == 0 { return nil }
+	if ar == 0 {
+		if q.End != len(m) { return fmt.Errorf("trailing data after DNS question") }
+		return nil
+	}
 	if ar != 1 { return fmt.Errorf("only one additional EDNS record is allowed") }
 
 	off := q.End
@@ -45,6 +50,11 @@ func ValidateQueryPolicy(m []byte, p Policy) error {
 	typ := binary.BigEndian.Uint16(m[off:off+2])
 	if typ != 41 { return fmt.Errorf("additional record type %d is not EDNS OPT", typ) }
 	udpSize := binary.BigEndian.Uint16(m[off+2:off+4])
+	ttl := binary.BigEndian.Uint32(m[off+4:off+8])
+	version := uint8((ttl >> 16) & 0xff)
+	if version != 0 { return fmt.Errorf("unsupported EDNS version %d", version) }
+	flags := uint16(ttl & 0xffff)
+	if flags & 0x7fff != 0 { return fmt.Errorf("reserved EDNS flags are set") }
 	if udpSize < 512 { return fmt.Errorf("EDNS UDP size %d below DNS minimum", udpSize) }
 	if p.MaxUDPSize != 0 && udpSize > p.MaxUDPSize { return fmt.Errorf("EDNS UDP size %d exceeds policy maximum %d", udpSize, p.MaxUDPSize) }
 	rdlen := int(binary.BigEndian.Uint16(m[off+8:off+10]))
