@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+type ControlListener struct {
+	net.Listener
+	path string
+}
+
+func (l *ControlListener) Close() error {
+	err:=l.Listener.Close()
+	if removeErr:=os.Remove(l.path); removeErr!=nil && !os.IsNotExist(removeErr) && err==nil { err=removeErr }
+	return err
+}
+
 type ControlServer struct {
 	ID      string
 	Version string
@@ -16,7 +27,7 @@ type ControlServer struct {
 	Healthy func() bool
 }
 
-func (s ControlServer) Serve() (net.Listener, error) {
+func (s ControlServer) Serve() (*ControlListener, error) {
 	if s.ID == "" || s.Socket == "" { return nil, fmt.Errorf("gateway control id and socket are required") }
 	dir:=filepath.Dir(s.Socket)
 	if err:=os.MkdirAll(dir,0750); err!=nil { return nil, fmt.Errorf("create control socket directory: %w",err) }
@@ -35,7 +46,7 @@ func (s ControlServer) Serve() (net.Listener, error) {
 			go s.handle(c)
 		}
 	}()
-	return ln, nil
+	return &ControlListener{Listener:ln,path:s.Socket}, nil
 }
 
 func (s ControlServer) handle(c net.Conn) {
