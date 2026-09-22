@@ -1,0 +1,22 @@
+version: 1
+zones:
+  lan:
+    interfaces: [lan0]
+  wan:
+    interfaces: [wan0]
+policy:
+  default: deny
+  rules:
+    - name: lan-dns
+      from: lan
+      to: wan
+      protocol: dns
+      action: proxy
+      module: pag-dns
+modules:
+  pag-dns:
+    enabled: false
+    listen: "[::1]:1053"
+logging:
+  format: json
+  level: info
