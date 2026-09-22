@@ -89,3 +89,32 @@ sleep .1
 grep -q '"transport":"tcp".*"reason":"global_concurrency_limit"' "$TMP/audit.log"
 wait "$HOLD"
 echo "PASS: global TCP concurrency limit enforced and audited"
+
+
+# Global UDP in-flight cap: a black-hole UDP upstream keeps the first exchange
+# occupied until its deadline, so the second request must be rejected globally.
+kill "$PID"; wait "$PID" 2>/dev/null || true
+: >"$TMP/audit.log"
+"$TMP/pag-dns" -listen 127.0.0.1:55353 -upstream 127.0.0.1:55354 \
+  -control "$SOCK" -rate 100 -burst 100 -max-udp-inflight 1 \
+  2>"$TMP/audit.log" &
+PID=$!
+sleep .3
+python3 - <<'PY' &
+import socket,time
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+s.bind(("127.0.0.1",55354))
+time.sleep(4)
+s.close()
+PY
+BLACKHOLE=$!
+sleep .1
+cat "$TMP/q.bin" | nc -u -w 1 127.0.0.1 55353 >/dev/null 2>&1 || true &
+Q1=$!
+sleep .1
+cat "$TMP/q.bin" | nc -u -w 1 127.0.0.1 55353 >/dev/null 2>&1 || true
+sleep .1
+grep -q '"transport":"udp".*"reason":"global_concurrency_limit"' "$TMP/audit.log"
+wait "$Q1" 2>/dev/null || true
+wait "$BLACKHOLE" 2>/dev/null || true
+echo "PASS: global UDP in-flight limit enforced and audited"
