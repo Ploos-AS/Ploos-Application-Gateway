@@ -24,6 +24,8 @@ func main() {
 	rate := flag.Float64("rate", 50, "queries per second per client")
 	burst := flag.Int("burst", 100, "per-client query burst")
 	maxTCP := flag.Int("max-tcp-per-client", 16, "maximum concurrent TCP sessions per client")
+	maxUDPGlobal := flag.Int("max-udp-inflight", 256, "maximum global in-flight UDP upstream exchanges")
+	maxTCPGlobal := flag.Int("max-tcp-global", 256, "maximum global concurrent TCP sessions")
 	auditEnabled := flag.Bool("audit", true, "emit privacy-minimal structured DNS audit events")
 	flag.Parse()
 
@@ -35,11 +37,14 @@ func main() {
 	if *auditEnabled { audit = dnsaudit.New(os.Stderr) }
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
-	go serveUDP(*listen, *upstream, udpLimit, audit)
-	serveTCP(*listen, *upstream, tcpLimit, audit)
+	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 { log.Fatal("global limits must be >= 1") }
+	udpSlots := make(chan struct{}, *maxUDPGlobal)
+	tcpSlots := make(chan struct{}, *maxTCPGlobal)
+	go serveUDP(*listen, *upstream, udpLimit, audit, udpSlots)
+	serveTCP(*listen, *upstream, tcpLimit, audit, tcpSlots)
 }
 
-func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger) {
+func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil { log.Fatal(err) }
 	defer pc.Close()
@@ -55,7 +60,14 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Log
 			audit.Log("deny","udp",qt,err.Error())
 			continue
 		}
+		select {
+		case slots <- struct{}{}:
+		default:
+			audit.Log("deny","udp",mustQType(q),"global_concurrency_limit")
+			continue
+		}
 		go func() {
+			defer func(){ <-slots }()
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil { return }
 			defer c.Close()
@@ -76,16 +88,21 @@ func serveUDP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Log
 	}
 }
 
-func serveTCP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger) {
+func serveTCP(addr, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil { log.Fatal(err) }
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
 		if err != nil { log.Fatal(err) }
-		if !limiter.Allow(c.RemoteAddr()) { audit.Log("deny","tcp",0,"rate_limit"); _=c.Close(); continue }
-		if !limiter.Acquire(c.RemoteAddr()) { audit.Log("deny","tcp",0,"concurrency_limit"); _=c.Close(); continue }
-		go func() { defer limiter.Release(c.RemoteAddr()); handleTCP(c, upstream, audit) }()
+		select {
+		case slots <- struct{}{}:
+		default:
+			audit.Log("deny","tcp",0,"global_concurrency_limit"); _=c.Close(); continue
+		}
+		if !limiter.Allow(c.RemoteAddr()) { <-slots; audit.Log("deny","tcp",0,"rate_limit"); _=c.Close(); continue }
+		if !limiter.Acquire(c.RemoteAddr()) { <-slots; audit.Log("deny","tcp",0,"concurrency_limit"); _=c.Close(); continue }
+		go func() { defer func(){ limiter.Release(c.RemoteAddr()); <-slots }(); handleTCP(c, upstream, audit) }()
 	}
 }
 
