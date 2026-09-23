@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -eux
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 77; }; }
 need ip
@@ -53,8 +53,26 @@ ip netns exec "$ROUTER" sysctl -q -w net.ipv4.ip_forward=1
 ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.all.forwarding=1
 
 # Baseline proves the namespace topology itself can route.
-ip netns exec "$CLIENT" ping -c 1 -W 1 198.51.100.2 >/dev/null
-ip netns exec "$CLIENT" ping -6 -c 1 -W 1 2001:db8:2::2 >/dev/null
+ip netns exec "$CLIENT" ping -c 1 -W 2 198.51.100.2 >/dev/null || {
+  echo "FAIL: IPv4 namespace baseline routing" >&2
+  ip -n "$CLIENT" addr
+  ip -n "$CLIENT" route
+  ip -n "$ROUTER" addr
+  ip -n "$ROUTER" route
+  ip -n "$UPSTREAM" addr
+  ip -n "$UPSTREAM" route
+  exit 1
+}
+ip netns exec "$CLIENT" ping -6 -c 1 -W 2 2001:db8:2::2 >/dev/null || {
+  echo "FAIL: IPv6 namespace baseline routing" >&2
+  ip -n "$CLIENT" -6 addr
+  ip -n "$CLIENT" -6 route
+  ip -n "$ROUTER" -6 addr
+  ip -n "$ROUTER" -6 route
+  ip -n "$UPSTREAM" -6 addr
+  ip -n "$UPSTREAM" -6 route
+  exit 1
+}
 
 ip netns exec "$ROUTER" nft -f - <<'EOF'
 table inet pag {
