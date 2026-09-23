@@ -31,34 +31,46 @@ func main() {
 	auditEnabled := flag.Bool("audit", true, "emit privacy-minimal structured DNS audit events")
 	flag.Parse()
 
-	controlListener, err := (gateway.ControlServer{ID:"pag-dns", Version:version.Version, Socket:*control}).Serve()
-	if err != nil { log.Fatalf("control socket: %v", err) }
+	controlListener, err := (gateway.ControlServer{ID: "pag-dns", Version: version.Version, Socket: *control}).Serve()
+	if err != nil {
+		log.Fatalf("control socket: %v", err)
+	}
 	defer controlListener.Close()
 
 	var audit *dnsaudit.Logger
-	if *auditEnabled { audit = dnsaudit.New(os.Stderr) }
+	if *auditEnabled {
+		audit = dnsaudit.New(os.Stderr)
+	}
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
-	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 { log.Fatal("global limits must be >= 1") }
+	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 {
+		log.Fatal("global limits must be >= 1")
+	}
 	udpSlots := make(chan struct{}, *maxUDPGlobal)
 	tcpSlots := make(chan struct{}, *maxTCPGlobal)
 
 	pc, err := net.ListenPacket("udp", *listen)
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	ln, err := net.Listen("tcp", *listen)
-	if err != nil { _=pc.Close(); log.Fatal(err) }
+	if err != nil {
+		_ = pc.Close()
+		log.Fatal(err)
+	}
 
-	stop:=make(chan os.Signal,1)
-	signal.Notify(stop,os.Interrupt,syscall.SIGTERM)
-	done:=make(chan struct{},2)
-	go func(){ serveUDP(pc,*upstream,udpLimit,audit,udpSlots); done<-struct{}{} }()
-	go func(){ serveTCP(ln,*upstream,tcpLimit,audit,tcpSlots); done<-struct{}{} }()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{}, 2)
+	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots); done <- struct{}{} }()
+	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots); done <- struct{}{} }()
 	<-stop
 	signal.Stop(stop)
 	_ = pc.Close()
 	_ = ln.Close()
 	_ = controlListener.Close()
-	<-done; <-done
+	<-done
+	<-done
 }
 
 func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
@@ -67,41 +79,59 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 	for {
 		n, peer, err := pc.ReadFrom(buf)
 		if err != nil {
-			if isClosedNetworkError(err) { return }
-			log.Printf("UDP read: %v",err); return
+			if isClosedNetworkError(err) {
+				return
+			}
+			log.Printf("UDP read: %v", err)
+			return
 		}
 		q := append([]byte(nil), buf[:n]...)
-		if !limiter.Allow(peer) { audit.Log("deny","udp",0,"rate_limit"); continue }
-		if err:=dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()); err != nil {
+		if !limiter.Allow(peer) {
+			audit.Log("deny", "udp", 0, "rate_limit")
+			continue
+		}
+		if err := dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()); err != nil {
 			var qt uint16
-			if parsed,e:=dnswire.ParseQuestion(q); e==nil { qt=parsed.Type }
-			audit.Log("deny","udp",qt,err.Error())
+			if parsed, e := dnswire.ParseQuestion(q); e == nil {
+				qt = parsed.Type
+			}
+			audit.Log("deny", "udp", qt, err.Error())
 			continue
 		}
 		select {
 		case slots <- struct{}{}:
 		default:
-			audit.Log("deny","udp",mustQType(q),"global_concurrency_limit")
+			audit.Log("deny", "udp", mustQType(q), "global_concurrency_limit")
 			continue
 		}
 		go func() {
-			defer func(){ <-slots }()
+			defer func() { <-slots }()
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 			defer c.Close()
-			_ = c.SetDeadline(time.Now().Add(3*time.Second))
-			if _, err = c.Write(q); err != nil { return }
+			_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+			if _, err = c.Write(q); err != nil {
+				return
+			}
 			r := make([]byte, 4096)
 			n, err := c.Read(r)
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 			resp := r[:n]
-			if dnswire.ValidateResponse(q, resp) != nil { return }
+			if dnswire.ValidateResponse(q, resp) != nil {
+				return
+			}
 			if dnswire.IsTruncated(resp) {
 				resp, err = exchangeTCP(upstream, q)
-				if err != nil { return }
+				if err != nil {
+					return
+				}
 			}
 			_, _ = pc.WriteTo(resp, peer)
-			audit.Log("allow","udp",mustQType(q),"proxied")
+			audit.Log("allow", "udp", mustQType(q), "proxied")
 		}()
 	}
 }
@@ -111,71 +141,123 @@ func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *d
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if isClosedNetworkError(err) { return }
-			log.Printf("TCP accept: %v",err); return
+			if isClosedNetworkError(err) {
+				return
+			}
+			log.Printf("TCP accept: %v", err)
+			return
 		}
 		select {
 		case slots <- struct{}{}:
 		default:
-			audit.Log("deny","tcp",0,"global_concurrency_limit"); _=c.Close(); continue
+			audit.Log("deny", "tcp", 0, "global_concurrency_limit")
+			_ = c.Close()
+			continue
 		}
-		if !limiter.Allow(c.RemoteAddr()) { <-slots; audit.Log("deny","tcp",0,"rate_limit"); _=c.Close(); continue }
-		if !limiter.Acquire(c.RemoteAddr()) { <-slots; audit.Log("deny","tcp",0,"concurrency_limit"); _=c.Close(); continue }
-		go func() { defer func(){ limiter.Release(c.RemoteAddr()); <-slots }(); handleTCP(c, upstream, audit) }()
+		if !limiter.Allow(c.RemoteAddr()) {
+			<-slots
+			audit.Log("deny", "tcp", 0, "rate_limit")
+			_ = c.Close()
+			continue
+		}
+		if !limiter.Acquire(c.RemoteAddr()) {
+			<-slots
+			audit.Log("deny", "tcp", 0, "concurrency_limit")
+			_ = c.Close()
+			continue
+		}
+		go func() {
+			defer func() { limiter.Release(c.RemoteAddr()); <-slots }()
+			handleTCP(c, upstream, audit)
+		}()
 	}
 }
 
 func exchangeTCP(upstream string, q []byte) ([]byte, error) {
 	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer up.Close()
-	_ = up.SetDeadline(time.Now().Add(5*time.Second))
+	_ = up.SetDeadline(time.Now().Add(5 * time.Second))
 	var hdr [2]byte
 	binary.BigEndian.PutUint16(hdr[:], uint16(len(q)))
-	if _, err = up.Write(append(hdr[:], q...)); err != nil { return nil, err }
-	if _, err = io.ReadFull(up, hdr[:]); err != nil { return nil, err }
+	if _, err = up.Write(append(hdr[:], q...)); err != nil {
+		return nil, err
+	}
+	if _, err = io.ReadFull(up, hdr[:]); err != nil {
+		return nil, err
+	}
 	rn := int(binary.BigEndian.Uint16(hdr[:]))
-	if rn < 12 || rn > 4096 { return nil, io.ErrUnexpectedEOF }
+	if rn < 12 || rn > 4096 {
+		return nil, io.ErrUnexpectedEOF
+	}
 	r := make([]byte, rn)
-	if _, err = io.ReadFull(up, r); err != nil { return nil, err }
-	if err = dnswire.ValidateResponse(q, r); err != nil { return nil, err }
+	if _, err = io.ReadFull(up, r); err != nil {
+		return nil, err
+	}
+	if err = dnswire.ValidateResponse(q, r); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
 func handleTCP(client net.Conn, upstream string, audit *dnsaudit.Logger) {
 	defer client.Close()
-	_ = client.SetDeadline(time.Now().Add(5*time.Second))
+	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 	var hdr [2]byte
-	if _, err := io.ReadFull(client, hdr[:]); err != nil { return }
+	if _, err := io.ReadFull(client, hdr[:]); err != nil {
+		return
+	}
 	n := int(binary.BigEndian.Uint16(hdr[:]))
-	if n < 12 || n > 4096 { return }
+	if n < 12 || n > 4096 {
+		return
+	}
 	q := make([]byte, n)
-	if _, err := io.ReadFull(client, q); err != nil { audit.Log("deny","tcp",0,"read_error"); return }
-	if err:=dnswire.ValidateQueryPolicy(q,dnswire.DefaultPolicy()); err!=nil { audit.Log("deny","tcp",mustQType(q),err.Error()); return }
+	if _, err := io.ReadFull(client, q); err != nil {
+		audit.Log("deny", "tcp", 0, "read_error")
+		return
+	}
+	if err := dnswire.ValidateQueryPolicy(q, dnswire.DefaultPolicy()); err != nil {
+		audit.Log("deny", "tcp", mustQType(q), err.Error())
+		return
+	}
 
 	up, err := net.DialTimeout("tcp", upstream, 2*time.Second)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	defer up.Close()
-	_ = up.SetDeadline(time.Now().Add(5*time.Second))
+	_ = up.SetDeadline(time.Now().Add(5 * time.Second))
 	binary.BigEndian.PutUint16(hdr[:], uint16(len(q)))
-	if _, err = up.Write(append(hdr[:], q...)); err != nil { return }
-	if _, err = io.ReadFull(up, hdr[:]); err != nil { return }
+	if _, err = up.Write(append(hdr[:], q...)); err != nil {
+		return
+	}
+	if _, err = io.ReadFull(up, hdr[:]); err != nil {
+		return
+	}
 	rn := int(binary.BigEndian.Uint16(hdr[:]))
-	if rn < 12 || rn > 4096 { return }
+	if rn < 12 || rn > 4096 {
+		return
+	}
 	r := make([]byte, rn)
-	if _, err = io.ReadFull(up, r); err != nil || dnswire.ValidateResponse(q, r) != nil { return }
+	if _, err = io.ReadFull(up, r); err != nil || dnswire.ValidateResponse(q, r) != nil {
+		return
+	}
 	_, _ = client.Write(append(hdr[:], r...))
-	audit.Log("allow","tcp",mustQType(q),"proxied")
+	audit.Log("allow", "tcp", mustQType(q), "proxied")
 }
 
 func mustQType(q []byte) uint16 {
-	parsed,err:=dnswire.ParseQuestion(q)
-	if err!=nil{return 0}
+	parsed, err := dnswire.ParseQuestion(q)
+	if err != nil {
+		return 0
+	}
 	return parsed.Type
 }
 
 func isClosedNetworkError(err error) bool {
-	return err==net.ErrClosed
+	return err == net.ErrClosed
 }
 
 func init() {
