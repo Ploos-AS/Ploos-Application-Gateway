@@ -25,34 +25,50 @@ func main() {
 	flag.Parse()
 
 	pc, err := net.ListenPacket("udp", *listen)
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer pc.Close()
 	ln, err := net.Listen("tcp", *listen)
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer ln.Close()
 
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			n, peer, err := pc.ReadFrom(buf)
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 			r := response(buf[:n])
-			if *truncateUDP && len(r) >= 4 { r[2] |= 0x02 }
+			if *truncateUDP && len(r) >= 4 {
+				r[2] |= 0x02
+			}
 			_, _ = pc.WriteTo(r, peer)
 		}
 	}()
 
 	for {
 		c, err := ln.Accept()
-		if err != nil { log.Fatal(err) }
+		if err != nil {
+			log.Fatal(err)
+		}
 		go func(c net.Conn) {
 			defer c.Close()
 			var h [2]byte
-			if _, err := io.ReadFull(c, h[:]); err != nil { return }
+			if _, err := io.ReadFull(c, h[:]); err != nil {
+				return
+			}
 			n := int(binary.BigEndian.Uint16(h[:]))
-			if n < 12 || n > 4096 { return }
+			if n < 12 || n > 4096 {
+				return
+			}
 			q := make([]byte, n)
-			if _, err := io.ReadFull(c, q); err != nil { return }
+			if _, err := io.ReadFull(c, q); err != nil {
+				return
+			}
 			r := response(q)
 			binary.BigEndian.PutUint16(h[:], uint16(len(r)))
 			_, _ = c.Write(append(h[:], r...))

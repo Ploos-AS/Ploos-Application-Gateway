@@ -11,9 +11,13 @@ type Decision struct {
 func Evaluate(c *config.Config, from, to, protocol string) Decision {
 	for _, r := range c.Policy.Rules {
 		if r.From == from && r.To == to && r.Protocol == protocol {
-			if r.Action != "proxy" { return Decision{Rule: r.Name} }
+			if r.Action != "proxy" {
+				return Decision{Rule: r.Name}
+			}
 			g, ok := c.Gateways[r.Gateway]
-			if !ok || !g.Enabled { return Decision{Rule: r.Name} }
+			if !ok || !g.Enabled {
+				return Decision{Rule: r.Name}
+			}
 			return Decision{Allowed: true, Gateway: r.Gateway, Rule: r.Name}
 		}
 	}

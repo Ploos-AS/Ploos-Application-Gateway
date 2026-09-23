@@ -30,18 +30,26 @@ func main() {
 	}
 
 	cfg, err := config.Load(*configPath)
-	if err != nil { log.Fatalf("configuration rejected: %v", err) }
+	if err != nil {
+		log.Fatalf("configuration rejected: %v", err)
+	}
 
 	if *nftDryRun {
 		rules, err := nft.Render(cfg)
-		if err != nil { log.Fatalf("nftables render failed: %v", err) }
+		if err != nil {
+			log.Fatalf("nftables render failed: %v", err)
+		}
 		fmt.Print(rules)
 		return
 	}
 
 	registry, err := gateway.DiscoverAll(context.Background(), cfg.Gateways)
-	if err != nil { log.Fatalf("gateway discovery failed (fail closed): %v", err) }
+	if err != nil {
+		log.Fatalf("gateway discovery failed (fail closed): %v", err)
+	}
 
 	fmt.Printf("PAG %s: configuration valid; %d gateway(s) healthy\n", version.Version, len(registry.IDs()))
-	for _, id := range registry.IDs() { fmt.Printf("gateway: %s\n", id) }
+	for _, id := range registry.IDs() {
+		fmt.Printf("gateway: %s\n", id)
+	}
 }
