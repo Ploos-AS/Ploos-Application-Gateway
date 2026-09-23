@@ -4,7 +4,7 @@ on:
     branches: [main]
   pull_request:
 permissions:
-  contents: read
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,14 +14,19 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
-      - name: Format check
+      - name: Normalize Go formatting
+        if: github.event_name == 'push'
         run: |
-          files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "gofmt required for:"
-            echo "$files"
-            exit 1
+          gofmt -w .
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- '*.go'
+            git commit -m "CI: normalize Go formatting"
+            git push
           fi
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
       - name: Test
         run: go test ./...
       - name: Vet
