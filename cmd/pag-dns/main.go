@@ -75,8 +75,9 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	done := make(chan string, 2)
 	var workers sync.WaitGroup
+	var clients sync.Map
 	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots, &workers); done <- "udp" }()
-	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots, &workers); done <- "tcp" }()
+	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots, &workers, &clients); done <- "tcp" }()
 
 	var firstDone string
 	select {
@@ -89,6 +90,10 @@ func main() {
 
 	_ = pc.Close()
 	_ = ln.Close()
+	clients.Range(func(key, _ any) bool {
+		_ = key.(net.Conn).Close()
+		return true
+	})
 	_ = controlListener.Close()
 	if firstDone == "" {
 		<-done
@@ -139,9 +144,11 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 			audit.Log("deny", "udp", mustQType(q), "global_concurrency_limit")
 			continue
 		}
+		clients.Store(c, struct{}{})
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			defer clients.Delete(c)
 			defer func() { <-slots }()
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil {
@@ -173,7 +180,7 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 	}
 }
 
-func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}, workers *sync.WaitGroup) {
+func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}, workers *sync.WaitGroup, clients *sync.Map) {
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
