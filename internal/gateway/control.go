@@ -6,20 +6,25 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 type ControlListener struct {
 	net.Listener
-	path string
+	path      string
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (l *ControlListener) Close() error {
-	err := l.Listener.Close()
-	if removeErr := os.Remove(l.path); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
-		err = removeErr
-	}
-	return err
+	l.closeOnce.Do(func() {
+		l.closeErr = l.Listener.Close()
+		if removeErr := os.Remove(l.path); removeErr != nil && !os.IsNotExist(removeErr) && l.closeErr == nil {
+			l.closeErr = removeErr
+		}
+	})
+	return l.closeErr
 }
 
 type ControlServer struct {
