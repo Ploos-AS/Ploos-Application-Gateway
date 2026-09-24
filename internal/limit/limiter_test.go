@@ -95,7 +95,6 @@ func TestActiveClientDoesNotExpire(t *testing.T) {
 	}
 }
 
-
 func TestClientStateLimitFailsClosed(t *testing.T) {
 	l := New(1, 1, 1)
 	l.maxClients = 2
