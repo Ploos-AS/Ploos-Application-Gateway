@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eux
+set -eu
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 77; }; }
 need ip
@@ -51,6 +51,23 @@ ip -n "$UPSTREAM" -6 route add 2001:db8:1::/64 via 2001:db8:2::1
 
 ip netns exec "$ROUTER" sysctl -q -w net.ipv4.ip_forward=1
 ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.all.forwarding=1
+# Enabling IPv6 forwarding changes router-interface behavior; explicitly
+# keep IPv6 enabled and accept router advertisements disabled on the test links.
+ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.pag-r0.disable_ipv6=0
+ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.pag-r1.disable_ipv6=0
+ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.pag-r0.accept_ra=0
+ip netns exec "$ROUTER" sysctl -q -w net.ipv6.conf.pag-r1.accept_ra=0
+# DAD is asynchronous in network namespaces; wait until all configured global
+# addresses are usable before treating forwarding as a topology failure.
+i=0
+while ip -n "$CLIENT" -6 addr show dev pag-c tentative | grep -q tentative ||
+      ip -n "$ROUTER" -6 addr show dev pag-r0 tentative | grep -q tentative ||
+      ip -n "$ROUTER" -6 addr show dev pag-r1 tentative | grep -q tentative ||
+      ip -n "$UPSTREAM" -6 addr show dev pag-u tentative | grep -q tentative; do
+  i=$((i+1))
+  [ "$i" -lt 50 ] || { echo "FAIL: IPv6 DAD did not settle" >&2; exit 1; }
+  sleep .05
+done
 
 # Baseline proves the namespace topology itself can route.
 ip netns exec "$CLIENT" ping -c 1 -W 2 198.51.100.2 >/dev/null || {
