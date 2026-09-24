@@ -96,7 +96,16 @@ func main() {
 	} else {
 		<-done
 	}
-	workers.Wait()
+	workersDone := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(workersDone)
+	}()
+	select {
+	case <-workersDone:
+	case <-time.After(6 * time.Second):
+		log.Printf("shutdown drain timed out with active DNS workers")
+	}
 }
 
 func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}, workers *sync.WaitGroup) {
