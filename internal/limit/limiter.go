@@ -21,12 +21,13 @@ type Limiter struct {
 	now       func() time.Time
 	idleTTL   time.Duration
 	lastSweep time.Time
+	maxClients int
 }
 
 func New(rate float64, burst, maxActive int) *Limiter {
 	return &Limiter{
 		clients: map[string]*bucket{}, rate: rate, burst: float64(burst),
-		maxActive: maxActive, now: time.Now, idleTTL: 10 * time.Minute,
+		maxActive: maxActive, now: time.Now, idleTTL: 10 * time.Minute, maxClients: 4096,
 	}
 }
 
@@ -53,16 +54,28 @@ func (l *Limiter) sweep(now time.Time) {
 	l.lastSweep = now
 }
 
+func (l *Limiter) bucket(k string, now time.Time) *bucket {
+	b := l.clients[k]
+	if b != nil {
+		return b
+	}
+	if l.maxClients > 0 && len(l.clients) >= l.maxClients {
+		return nil
+	}
+	b = &bucket{tokens: l.burst, last: now}
+	l.clients[k] = b
+	return b
+}
+
 func (l *Limiter) Allow(addr net.Addr) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	k := l.key(addr)
 	now := l.now()
 	l.sweep(now)
-	b := l.clients[k]
+	b := l.bucket(k, now)
 	if b == nil {
-		b = &bucket{tokens: l.burst, last: now}
-		l.clients[k] = b
+		return false
 	}
 	elapsed := now.Sub(b.last).Seconds()
 	b.tokens += elapsed * l.rate
@@ -83,10 +96,9 @@ func (l *Limiter) Acquire(addr net.Addr) bool {
 	k := l.key(addr)
 	now := l.now()
 	l.sweep(now)
-	b := l.clients[k]
+	b := l.bucket(k, now)
 	if b == nil {
-		b = &bucket{tokens: l.burst, last: now}
-		l.clients[k] = b
+		return false
 	}
 	b.last = now
 	if l.maxActive > 0 && b.active >= l.maxActive {
