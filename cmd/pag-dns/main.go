@@ -72,16 +72,28 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{}, 2)
-	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots); done <- struct{}{} }()
-	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots); done <- struct{}{} }()
-	<-stop
-	signal.Stop(stop)
+	done := make(chan string, 2)
+	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots); done <- "udp" }()
+	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots); done <- "tcp" }()
+
+	var firstDone string
+	select {
+	case <-stop:
+		signal.Stop(stop)
+	case firstDone = <-done:
+		log.Printf("%s server stopped unexpectedly; shutting down", firstDone)
+		signal.Stop(stop)
+	}
+
 	_ = pc.Close()
 	_ = ln.Close()
 	_ = controlListener.Close()
-	<-done
-	<-done
+	if firstDone == "" {
+		<-done
+		<-done
+	} else {
+		<-done
+	}
 }
 
 func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
