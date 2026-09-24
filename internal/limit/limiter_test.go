@@ -94,3 +94,37 @@ func TestActiveClientDoesNotExpire(t *testing.T) {
 		t.Fatal("active client expired")
 	}
 }
+
+
+func TestClientStateLimitFailsClosed(t *testing.T) {
+	l := New(1, 1, 1)
+	l.maxClients = 2
+	a := addr("192.0.2.1:1")
+	b := addr("192.0.2.2:1")
+	c := addr("192.0.2.3:1")
+	if !l.Allow(a) || !l.Allow(b) {
+		t.Fatal("clients within state limit rejected")
+	}
+	if l.Allow(c) {
+		t.Fatal("new client admitted after state limit reached")
+	}
+	if len(l.clients) != 2 {
+		t.Fatalf("client state exceeded limit: %d", len(l.clients))
+	}
+}
+
+func TestClientStateLimitPreservesActiveClient(t *testing.T) {
+	l := New(1, 1, 1)
+	l.maxClients = 1
+	a := addr("192.0.2.1:1")
+	if !l.Acquire(a) {
+		t.Fatal("active client rejected")
+	}
+	if l.Acquire(addr("192.0.2.2:1")) {
+		t.Fatal("new client admitted while state table full")
+	}
+	if _, ok := l.clients["192.0.2.1"]; !ok {
+		t.Fatal("active client state was evicted")
+	}
+	l.Release(a)
+}
