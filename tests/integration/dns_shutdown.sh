@@ -22,7 +22,8 @@ done
 python3 - <<'PY' >"$TMP/client.ready" &
 import socket, time
 s = socket.create_connection(("127.0.0.1", 55355))
-s.sendall(b"\\x10\\x00")\nprint("READY", flush=True)
+s.sendall(bytes([0x10, 0x00]))
+print("READY", flush=True)
 time.sleep(10)
 s.close()
 PY
