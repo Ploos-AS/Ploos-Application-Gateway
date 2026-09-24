@@ -21,11 +21,13 @@ done
 python3 - <<'PY' &
 import socket, time
 s = socket.create_connection(("127.0.0.1", 55355))
+s.sendall(b"\\x00\\x0c" + b"\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00")
 time.sleep(10)
 s.close()
 PY
 CLIENT_PID=$!
-sleep .1
+# Wait until the server has accepted the client and entered the worker.
+sleep .5
 
 kill -TERM "$PID"
 i=0
