@@ -144,11 +144,9 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 			audit.Log("deny", "udp", mustQType(q), "global_concurrency_limit")
 			continue
 		}
-		clients.Store(c, struct{}{})
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			defer clients.Delete(c)
 			defer func() { <-slots }()
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil {
@@ -210,9 +208,11 @@ func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *d
 			_ = c.Close()
 			continue
 		}
+		clients.Store(c, struct{}{})
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			defer clients.Delete(c)
 			defer func() { limiter.Release(c.RemoteAddr()); <-slots }()
 			handleTCP(c, upstream, audit)
 		}()
