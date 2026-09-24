@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -257,7 +258,7 @@ func mustQType(q []byte) uint16 {
 }
 
 func isClosedNetworkError(err error) bool {
-	return err == net.ErrClosed
+	return errors.Is(err, net.ErrClosed)
 }
 
 func init() {
