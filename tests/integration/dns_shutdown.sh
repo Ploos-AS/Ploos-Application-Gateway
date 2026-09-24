@@ -17,16 +17,16 @@ while [ ! -S "$SOCK" ]; do
   sleep .05
 done
 
-# Hold an accepted TCP DNS client open so shutdown must drain a live worker.
+# Hold an accepted TCP DNS client open with an incomplete DNS frame.
+# The worker blocks waiting for the declared payload, exercising bounded drain.
 python3 - <<'PY' &
 import socket, time
 s = socket.create_connection(("127.0.0.1", 55355))
-s.sendall(b"\\x00\\x0c" + b"\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00")
+s.sendall(b"\\x10\\x00")
 time.sleep(10)
 s.close()
 PY
 CLIENT_PID=$!
-# Wait until the server has accepted the client and entered the worker.
 sleep .5
 
 kill -TERM "$PID"
