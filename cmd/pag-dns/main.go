@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"sync"
 	"time"
 
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnsaudit"
@@ -73,8 +74,9 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	done := make(chan string, 2)
-	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots); done <- "udp" }()
-	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots); done <- "tcp" }()
+	var workers sync.WaitGroup
+	go func() { serveUDP(pc, *upstream, udpLimit, audit, udpSlots, &workers); done <- "udp" }()
+	go func() { serveTCP(ln, *upstream, tcpLimit, audit, tcpSlots, &workers); done <- "tcp" }()
 
 	var firstDone string
 	select {
@@ -94,9 +96,10 @@ func main() {
 	} else {
 		<-done
 	}
+	workers.Wait()
 }
 
-func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
+func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}, workers *sync.WaitGroup) {
 	defer pc.Close()
 	buf := make([]byte, 4096)
 	for {
@@ -127,7 +130,9 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 			audit.Log("deny", "udp", mustQType(q), "global_concurrency_limit")
 			continue
 		}
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			defer func() { <-slots }()
 			c, err := net.DialTimeout("udp", upstream, 2*time.Second)
 			if err != nil {
@@ -159,7 +164,7 @@ func serveUDP(pc net.PacketConn, upstream string, limiter *limit.Limiter, audit 
 	}
 }
 
-func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}) {
+func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *dnsaudit.Logger, slots chan struct{}, workers *sync.WaitGroup) {
 	defer ln.Close()
 	for {
 		c, err := ln.Accept()
@@ -189,7 +194,9 @@ func serveTCP(ln net.Listener, upstream string, limiter *limit.Limiter, audit *d
 			_ = c.Close()
 			continue
 		}
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			defer func() { limiter.Release(c.RemoteAddr()); <-slots }()
 			handleTCP(c, upstream, audit)
 		}()
