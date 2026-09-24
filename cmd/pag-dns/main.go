@@ -10,8 +10,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"syscall"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Ploos-AS/Ploos-Application-Gateway/internal/dnsaudit"
