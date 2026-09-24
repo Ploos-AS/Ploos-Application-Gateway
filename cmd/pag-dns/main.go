@@ -32,6 +32,19 @@ func main() {
 	auditEnabled := flag.Bool("audit", true, "emit privacy-minimal structured DNS audit events")
 	flag.Parse()
 
+	if *rate <= 0 {
+		log.Fatal("rate must be > 0")
+	}
+	if *burst < 1 {
+		log.Fatal("burst must be >= 1")
+	}
+	if *maxTCP < 1 {
+		log.Fatal("max-tcp-per-client must be >= 1")
+	}
+	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 {
+		log.Fatal("global limits must be >= 1")
+	}
+
 	controlListener, err := (gateway.ControlServer{ID: "pag-dns", Version: version.Version, Socket: *control}).Serve()
 	if err != nil {
 		log.Fatalf("control socket: %v", err)
@@ -44,9 +57,6 @@ func main() {
 	}
 	udpLimit := limit.New(*rate, *burst, 0)
 	tcpLimit := limit.New(*rate, *burst, *maxTCP)
-	if *maxUDPGlobal < 1 || *maxTCPGlobal < 1 {
-		log.Fatal("global limits must be >= 1")
-	}
 	udpSlots := make(chan struct{}, *maxUDPGlobal)
 	tcpSlots := make(chan struct{}, *maxTCPGlobal)
 
