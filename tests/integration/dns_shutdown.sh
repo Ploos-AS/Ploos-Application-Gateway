@@ -40,7 +40,7 @@ kill -TERM "$PID"
 i=0
 while kill -0 "$PID" 2>/dev/null; do
   i=$((i+1))
-  [ "$i" -lt 160 ] || { echo "FAIL: pag-dns did not exit after bounded worker drain" >&2; exit 1; }
+  [ "$i" -lt 60 ] || { echo "FAIL: pag-dns did not promptly drain stalled client" >&2; exit 1; }
   sleep .05
 done
 wait "$PID"
@@ -49,11 +49,11 @@ kill "$CLIENT_PID" 2>/dev/null || true
 wait "$CLIENT_PID" 2>/dev/null || true
 CLIENT_PID=
 
-grep -q "shutdown drain timed out with active DNS workers" "$TMP/log" || {
-  echo "FAIL: active worker did not exercise bounded drain timeout" >&2
+if grep -q "shutdown drain timed out with active DNS workers" "$TMP/log"; then
+  echo "FAIL: stalled client required shutdown drain timeout" >&2
   cat "$TMP/log" >&2
   exit 1
-}
+fi
 
 [ ! -e "$SOCK" ] || { echo "FAIL: control socket remains after shutdown" >&2; exit 1; }
-echo "PASS: pag-dns bounds active-worker drain and removes control socket"
+echo "PASS: pag-dns promptly drains stalled TCP client and removes control socket"
