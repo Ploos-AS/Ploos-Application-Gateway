@@ -20,7 +20,7 @@ type Limiter struct {
 	maxActive int
 	now       func() time.Time
 	idleTTL   time.Duration
-	lastSweep time.Time
+	lastSweep  time.Time
 	maxClients int
 }
 
