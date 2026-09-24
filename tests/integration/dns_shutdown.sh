@@ -19,15 +19,21 @@ done
 
 # Hold an accepted TCP DNS client open with an incomplete DNS frame.
 # The worker blocks waiting for the declared payload, exercising bounded drain.
-python3 - <<'PY' &
+python3 - <<'PY' >"$TMP/client.ready" &
 import socket, time
 s = socket.create_connection(("127.0.0.1", 55355))
-s.sendall(b"\\x10\\x00")
+s.sendall(b"\\x10\\x00")\nprint("READY", flush=True)
 time.sleep(10)
 s.close()
 PY
 CLIENT_PID=$!
-sleep .5
+i=0
+while ! grep -q READY "$TMP/client.ready" 2>/dev/null; do
+  i=$((i+1))
+  [ "$i" -lt 50 ] || { echo "FAIL: stalled client did not become ready" >&2; exit 1; }
+  sleep .05
+done
+sleep .2
 
 kill -TERM "$PID"
 i=0
