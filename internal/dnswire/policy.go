@@ -21,8 +21,15 @@ func DefaultPolicy() Policy {
 			2:  true, // NS
 			6:  true, // SOA
 			12: true, // PTR
-			33: true, // SRV
-			65: true, // HTTPS
+			33:  true, // SRV
+			35:  true, // NAPTR
+			43:  true, // DS
+			44:  true, // SSHFP
+			48:  true, // DNSKEY
+			52:  true, // TLSA
+			64:  true, // SVCB
+			65:  true, // HTTPS
+			257: true, // CAA
 		},
 		MaxUDPSize: 1232,
 	}
