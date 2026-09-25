@@ -13,13 +13,13 @@ type bucket struct {
 }
 
 type Limiter struct {
-	mu        sync.Mutex
-	clients   map[string]*bucket
-	rate      float64
-	burst     float64
-	maxActive int
-	now       func() time.Time
-	idleTTL   time.Duration
+	mu         sync.Mutex
+	clients    map[string]*bucket
+	rate       float64
+	burst      float64
+	maxActive  int
+	now        func() time.Time
+	idleTTL    time.Duration
 	lastSweep  time.Time
 	maxClients int
 }
