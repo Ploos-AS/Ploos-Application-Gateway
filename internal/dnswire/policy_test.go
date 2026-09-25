@@ -94,3 +94,26 @@ func TestEDNSDOFlagAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+
+func TestDefaultPolicyAllowsModernSafeTypes(t *testing.T) {
+	for _, typ := range []uint16{35, 43, 44, 48, 52, 64, 65, 257} {
+		q := query([]byte{1, 'a', 0})
+		q[len(q)-4] = byte(typ >> 8)
+		q[len(q)-3] = byte(typ)
+		if err := ValidateQueryPolicy(q, DefaultPolicy()); err != nil {
+			t.Fatalf("DNS type %d rejected: %v", typ, err)
+		}
+	}
+}
+
+func TestDefaultPolicyStillDeniesTransferAndAnyTypes(t *testing.T) {
+	for _, typ := range []uint16{251, 252, 255} {
+		q := query([]byte{1, 'a', 0})
+		q[len(q)-4] = byte(typ >> 8)
+		q[len(q)-3] = byte(typ)
+		if err := ValidateQueryPolicy(q, DefaultPolicy()); err == nil {
+			t.Fatalf("DNS type %d must be denied", typ)
+		}
+	}
+}
