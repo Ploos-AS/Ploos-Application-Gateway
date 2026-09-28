@@ -95,7 +95,6 @@ func TestEDNSDOFlagAllowed(t *testing.T) {
 	}
 }
 
-
 func TestDefaultPolicyAllowsModernSafeTypes(t *testing.T) {
 	for _, typ := range []uint16{35, 43, 44, 48, 52, 64, 65, 257} {
 		q := query([]byte{1, 'a', 0})
