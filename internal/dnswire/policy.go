@@ -13,13 +13,13 @@ type Policy struct {
 func DefaultPolicy() Policy {
 	return Policy{
 		AllowedTypes: map[uint16]bool{
-			1:  true, // A
+			1:   true, // A
 			28: true, // AAAA
-			5:  true, // CNAME
+			5:   true, // CNAME
 			15: true, // MX
 			16: true, // TXT
-			2:  true, // NS
-			6:  true, // SOA
+			2:   true, // NS
+			6:   true, // SOA
 			12: true, // PTR
 			33:  true, // SRV
 			35:  true, // NAPTR
